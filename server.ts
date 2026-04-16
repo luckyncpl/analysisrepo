@@ -3,15 +3,15 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { chromium } from "playwright-core";
 import multer from "multer";
-import { createRequire } from "module";
 import cron from "node-cron";
 import { DateTime } from "luxon";
 import { initializeApp as initializeFirebaseApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, where, serverTimestamp } from 'firebase/firestore';
 import firebaseConfig from './firebase-applet-config.json';
 import { GoogleGenAI } from "@google/genai";
-
+import { createRequire } from "module";
 const require = createRequire(import.meta.url);
+const stealth = require("playwright-stealth");
 const pdf = require("pdf-parse");
 const mammoth = require("mammoth");
 const Papa = require("papaparse");
@@ -32,19 +32,30 @@ async function startServer() {
   // Helper for automated analysis
   const analyzeJobFitServer = async (content: string, candidate: any) => {
     const prompt = `
-      Analyze this job description for a ${candidate.technology} role with ${candidate.experience} years of experience.
-      Candidate Resume Text: ${candidate.resumeText || "Not provided"}
+      Here is a raw job description scraped from a website. Meticulously scan it from top to bottom. 
+      Extract every single requirement, skill, and responsibility into a structured JSON format. 
+      Do not skip any lines.
       
-      Job Description:
+      Candidate Profile:
+      - Technology: ${candidate.technology}
+      - Core Experience: ${candidate.experience} years
+      - Resume Context: ${candidate.resumeText || "Not provided"}
+      
+      Scraped Job Description:
       ${content}
       
-      Return a JSON object with:
+      Return a STRICT JSON object in this format:
       {
         "isGoodFit": boolean,
-        "fitReason": "string",
-        "jdMinExp": number,
+        "fitReason": "string (brief summary)",
+        "jdMinExp": number (the minimum years of experience required by the JD),
         "isEasyApplyMentioned": boolean,
-        "scenario": "Standard" | "High Exp" | "Low Exp"
+        "scenario": "Standard" | "High Exp" | "Low Exp",
+        "extractedRequirements": {
+          "skills": ["string"],
+          "responsibilities": ["string"],
+          "experience": "string"
+        }
       }
     `;
     
@@ -347,14 +358,19 @@ async function startServer() {
       console.log(`Fast resolution failed for ${url}:`, error instanceof Error ? error.message : error);
     }
 
-    // Layer 2: Browser Fallback
+    // Layer 2: Browser Fallback (Stealth)
     let browser;
     try {
       browser = await chromium.launch({
         args: ['--no-sandbox', '--disable-setuid-sandbox']
       });
-      const page = await browser.newPage();
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      const context = await browser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      });
+      const page = await context.newPage();
+      await stealth(page); // Apply stealth
+      
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
       const finalUrl = page.url();
       res.json({ finalUrl, method: 'browser' });
     } catch (error) {
@@ -379,60 +395,83 @@ async function startServer() {
     let browser;
     try {
       browser = await chromium.launch({
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
       });
-      const page = await browser.newPage();
-      
-      // Set realistic headers
-      await page.setExtraHTTPHeaders({
-        'Accept-Language': 'en-US,en;q=0.9',
+      const context = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
       });
+      const page = await context.newPage();
+      await stealth(page); // Apply stealth to bypass bots detection
 
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      console.log(`Navigating to for scraping: ${url}`);
       
+      // Go to URL and wait for meaningful content
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+      
+      // Additional wait for specific job elements if needed
+      await page.waitForTimeout(2000); 
+
       // Platform-specific JD selectors
       const extraction = await page.evaluate(() => {
-        const url = window.location.href.toLowerCase();
+        const currentUrl = window.location.href.toLowerCase();
         let jdSelector = "";
         let eaSelector = "";
 
-        if (url.includes('linkedin.com')) {
-          jdSelector = ".jobs-description__container, .jobs-box__html-content";
-          eaSelector = "button.jobs-apply-button--top-card";
-        } else if (url.includes('indeed.com')) {
-          jdSelector = "#jobDescriptionText";
-          eaSelector = "button#indeedApplyButton, .ia-IndeedApplyButton";
-        } else if (url.includes('glassdoor.com')) {
-          jdSelector = "[data-test='jobDescription']";
-          eaSelector = "button[data-test='easy-apply-button']";
+        if (currentUrl.includes('linkedin.com')) {
+          jdSelector = ".jobs-description__container, .jobs-box__html-content, #job-details, .jobs-description";
+          eaSelector = "button.jobs-apply-button--top-card, .jobs-apply-button";
+        } else if (currentUrl.includes('indeed.com')) {
+          jdSelector = "#jobDescriptionText, .jobsearch-jobDescriptionText";
+          eaSelector = "button#indeedApplyButton, .ia-IndeedApplyButton, #applyButton";
+        } else if (currentUrl.includes('glassdoor.com')) {
+          jdSelector = "[data-test='jobDescription'], .jobDescriptionContent";
+          eaSelector = "button[data-test='easy-apply-button'], .easyApply";
         } else {
-          // Generic fallback
-          jdSelector = "article, main, .description, .job-description, #job-details";
+          // Generic fallback for any job site
+          jdSelector = "article, main, .description, .job-description, #job-details, .jobsearch-JobComponent-description";
         }
 
         const jdElement = jdSelector ? document.querySelector(jdSelector) : null;
-        const content = jdElement ? (jdElement as HTMLElement).innerText : document.body.innerText;
+        let content = jdElement ? (jdElement as HTMLElement).innerText : "";
+        
+        // If content is still empty, grab everything useful
+        if (!content || content.length < 100) {
+          const main = document.querySelector('main') || document.body;
+          content = (main as HTMLElement).innerText;
+        }
+        
+        // Scrub common noise if needed, but the AI prompt asks for top-to-bottom scan
         
         let isEasyApply = false;
         if (eaSelector) {
           const eaBtn = document.querySelector(eaSelector);
           if (eaBtn) {
             const text = (eaBtn as HTMLElement).innerText.toLowerCase();
-            isEasyApply = text.includes('easy apply') || text.includes('apply now');
+            isEasyApply = text.includes('easy apply') || text.includes('apply now') || text.includes('apply');
           }
-        } else {
-          // Text-based fallback for EA
-          const bodyText = document.body.innerText.toLowerCase();
-          isEasyApply = bodyText.includes('easy apply') && !bodyText.includes('apply on company site');
+        }
+        
+        // Final fallback for EA
+        if (!isEasyApply) {
+          const allButtons = Array.from(document.querySelectorAll('button, a'));
+          isEasyApply = allButtons.some(b => {
+             const t = (b as HTMLElement).innerText.toLowerCase();
+             return (t.includes('easy apply') || t.includes('quick apply')) && !t.includes('company site');
+          });
         }
 
         return { content, isEasyApply };
       });
 
+      if (!extraction.content || extraction.content.length < 50) {
+        throw new Error("Scraped content is too short or empty. Protection might be active.");
+      }
+
       res.json(extraction);
     } catch (error) {
-      console.error("Scrape error:", error);
-      res.status(500).json({ error: "Failed to scrape job" });
+      console.error("Scrape error details:", error);
+      res.status(500).json({ error: "Failed to scrape job description properly. The site might be blocking the request." });
     } finally {
       if (browser) await browser.close();
     }

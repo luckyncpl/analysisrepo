@@ -6,7 +6,7 @@ import { CheckCircle2, XCircle, Play, Loader2, Search, Link2, BrainCircuit, Scal
 import { toast } from 'sonner';
 import { calculateJobFit } from '../lib/matchingEngine';
 
-export default function TestCenter() {
+export default function CoreEngine() {
   const [testUrl, setTestUrl] = useState('');
   const [isResolving, setIsResolving] = useState(false);
   const [resolveResult, setResolveResult] = useState<any>(null);
@@ -26,7 +26,7 @@ export default function TestCenter() {
       });
       const data = await res.json();
       setResolveResult(data);
-      toast.success('URL Resolution Test Complete');
+      toast.success('Core Engine URL Test Complete');
     } catch (error) {
       toast.error('URL Resolution Failed');
     } finally {
@@ -51,13 +51,13 @@ export default function TestCenter() {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Link2 className="w-5 h-5 text-blue-600" />
-              URL Resolution & Redirect Test
+              URL Resolution & Scrape Analysis
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex gap-2">
               <Input 
-                placeholder="Paste TinyURL or Job Link..." 
+                placeholder="Paste TinyURL or Job Link to test Core Scraper..." 
                 value={testUrl}
                 onChange={e => setTestUrl(e.target.value)}
               />

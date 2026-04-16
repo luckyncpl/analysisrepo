@@ -5,7 +5,7 @@ import Dashboard from './components/Dashboard';
 import MasterManagement from './components/MasterManagement';
 import CandidateMaster from './components/CandidateMaster';
 import JobMonitor from './components/JobMonitor';
-import TestCenter from './components/TestCenter';
+import CoreEngine from './components/CoreEngine';
 import UserManagement from './components/UserManagement';
 import { auth, db } from './lib/firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
@@ -204,7 +204,7 @@ export default function App() {
             <NavItem to="/candidates" icon={<Users className="w-5 h-5" />} label="Candidates" />
             <NavItem to="/master" icon={<Database className="w-5 h-5" />} label="Master Data" />
             <NavItem to="/users" icon={<ShieldCheck className="w-5 h-5" />} label="User Management" />
-            <NavItem to="/tests" icon={<CheckCircle2 className="w-5 h-5" />} label="Test Center" />
+            <NavItem to="/engine" icon={<CheckCircle2 className="w-5 h-5" />} label="Core Engine" />
           </nav>
 
           <div className="p-4 border-t border-slate-200">
@@ -230,7 +230,7 @@ export default function App() {
             <Route path="/candidates" element={<CandidateMaster />} />
             <Route path="/master" element={<MasterManagement />} />
             <Route path="/users" element={<UserManagement />} />
-            <Route path="/tests" element={<TestCenter />} />
+            <Route path="/engine" element={<CoreEngine />} />
           </Routes>
         </main>
       </div>
