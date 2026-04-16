@@ -1,0 +1,166 @@
+{
+  "entities": {
+    "MasterField": {
+      "title": "Master Field",
+      "description": "Master data for Technology, Team Lead, RM Person, and Mentoring Lead.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["technology", "team_lead", "rm_person", "mentoring_lead"],
+          "description": "The category of the master field."
+        },
+        "name": {
+          "type": "string",
+          "description": "The display name of the master field."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the field was created."
+        }
+      },
+      "required": ["type", "name"]
+    },
+    "Candidate": {
+      "title": "Candidate",
+      "description": "Candidate profile with resume and assigned leads.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Candidate's full name."
+        },
+        "technology": {
+          "type": "string",
+          "description": "Assigned technology."
+        },
+        "teamLead": {
+          "type": "string",
+          "description": "Assigned Team Lead."
+        },
+        "rmPerson": {
+          "type": "string",
+          "description": "Assigned RM Person."
+        },
+        "mentoringLead": {
+          "type": "string",
+          "description": "Assigned Mentoring Lead."
+        },
+        "experience": {
+          "type": "number",
+          "description": "Years of experience."
+        },
+        "resumeText": {
+          "type": "string",
+          "description": "Parsed text from the resume."
+        },
+        "resumeUrl": {
+          "type": "string",
+          "description": "URL to the resume file (if uploaded)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["name", "technology", "experience"]
+    },
+    "JobPosting": {
+      "title": "Job Posting",
+      "description": "A job application entry posted by the RM team.",
+      "type": "object",
+      "properties": {
+        "candidateId": {
+          "type": "string",
+          "description": "Reference to the candidate."
+        },
+        "role": {
+          "type": "string",
+          "description": "Job role title."
+        },
+        "tinyUrl": {
+          "type": "string",
+          "description": "The TinyURL provided in the sheet."
+        },
+        "finalUrl": {
+          "type": "string",
+          "description": "The resolved long URL."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "Date of posting."
+        },
+        "company": {
+          "type": "string",
+          "description": "Company name."
+        },
+        "source": {
+          "type": "string",
+          "description": "Job source (LinkedIn, Glassdoor, etc.)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "analyzing", "completed", "failed"],
+          "description": "Analysis status."
+        },
+        "analysis": {
+          "type": "object",
+          "properties": {
+            "isEasyApply": { "type": "boolean" },
+            "isGoodFit": { "type": "boolean" },
+            "fitReason": { "type": "string" },
+            "detectedExp": { "type": "string" },
+            "scenario": { "type": "string" }
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["candidateId", "role", "tinyUrl", "date"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Authorized user with email and role.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User's Gmail address."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "viewer"],
+          "description": "User's role."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/master_fields/{fieldId}": {
+      "schema": "MasterField",
+      "description": "Collection of master data fields."
+    },
+    "/candidates/{candidateId}": {
+      "schema": "Candidate",
+      "description": "Collection of candidate profiles."
+    },
+    "/job_postings/{postingId}": {
+      "schema": "JobPosting",
+      "description": "Collection of job postings and analysis results."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of authorized users."
+    }
+  }
+}

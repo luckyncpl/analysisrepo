@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: master_fields
+    // Fields: type (string), name (string), createdAt (timestamp)
+    //
+    // Collection: candidates
+    // Fields: name (string), technology (string), teamLead (string), rmPerson (string), 
+    //         mentoringLead (string), experience (number), resumeText (string), 
+    //         resumeUrl (string), createdAt (timestamp)
+    //
+    // Collection: job_postings
+    // Fields: candidateId (string), role (string), tinyUrl (string), finalUrl (string),
+    //         date (string), company (string), source (string), status (string),
+    //         analysis (map), createdAt (timestamp)
+    //
+    // Collection: users
+    // Fields: email (string), role (string), createdAt (timestamp)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email in ["aiworkshop92@gmail.com", "narayana.uda@ncplconsulting.net"] && request.auth.token.email_verified == true));
+    }
+
+    // Users: Admins can manage, authenticated users can read
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Master Fields: Admins can manage, authenticated users can read
+    match /master_fields/{fieldId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Candidates: Admins can manage, authenticated users can read
+    match /candidates/{candidateId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Job Postings: Admins can manage, authenticated users can read
+    match /job_postings/{postingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}
