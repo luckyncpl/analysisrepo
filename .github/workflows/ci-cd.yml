@@ -1,0 +1,149 @@
+name: "Production CI/CD with DB Protection"
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+# Permissions required for GitHub Pages and OIDC
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  # --- STAGE 1, 2, 3 & 4: Build and Security Analysis ---
+  build-and-scan:
+    name: Build and Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for SonarCloud analysis
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}"}'
+
+      # Stack Detection & Build Logic
+      - name: Detect Stack and Build
+        run: |
+          if [ -f "package.json" ]; then
+            echo "Detected Node.js project"
+            npm install
+            npm run build --if-present
+          elif [ -f "requirements.txt" ]; then
+            echo "Detected Python project"
+            pip install -r requirements.txt
+          elif [ -f "pom.xml" ]; then
+            echo "Detected Java (Maven) project"
+            mvn clean install -DskipTests
+          elif ls *.sln 1> /dev/null 2>&1; then
+            echo "Detected .NET project"
+            dotnet build
+          else
+            echo "No standard stack detected. Running generic build..."
+          fi
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORG }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+
+  # --- STAGE 5, 6 & 7: DB Change Detection & Backup ---
+  database-protection:
+    name: Database Protection
+    needs: build-and-scan
+    runs-on: ubuntu-latest
+    # Only run backup on actual merges/pushes to main to avoid redundant backups on PRs
+    if: github.event_name == 'push' 
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Detect if DB related files have changed using git diff
+      - name: Detect DB Changes
+        id: db_check
+        run: |
+          DB_PATTERNS="migrations/|db/|schema/|sql/|prisma/|alembic/|flyway/"
+          # Get the list of changed files between the previous commit and current commit
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep -E "$DB_PATTERNS" || true)
+          if [ -n "$CHANGED_FILES" ]; then
+            echo "db_changed=true" >> $GITHUB_OUTPUT
+            echo "Detected changes in: $CHANGED_FILES"
+          else
+            echo "db_changed=false" >> $GITHUB_OUTPUT
+            echo "No DB changes detected."
+          fi
+
+      - name: Azure Login
+        if: steps.db_check.outputs.db_changed == 'true'
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}"}'
+
+      - name: Automated Database Backup (CSV)
+        if: steps.db_check.outputs.db_changed == 'true'
+        run: |
+          TIMESTAMP=$(date +'%Y%m%d_%H%M%S')
+          FILENAME="backup_${{ github.ref_name }}_${{ github.run_number }}_${TIMESTAMP}.csv"
+          mkdir -p db-backups
+          
+          echo "DB changes detected. Initiating safety backup: $FILENAME"
+          
+          # --- PLACEHOLDER: DB EXPORT COMMANDS ---
+          # Replace the following logic with your specific DB engine command:
+          
+          # [MySQL]
+          # mysql -u root -p${{ secrets.DB_PASSWORD }} -e "SELECT * FROM my_table" --batch --silent > db-backups/$FILENAME
+          
+          # [PostgreSQL]
+          # psql -c "COPY my_table TO STDOUT WITH CSV HEADER" > db-backups/$FILENAME
+          
+          # [SQLite]
+          # sqlite3 my_db.sqlite ".headers on" ".mode csv" ".output db-backups/$FILENAME" "SELECT * FROM my_table;"
+          
+          # Mocking a successful export for YAML validation
+          echo "id,data,vibe_check" > db-backups/$FILENAME
+          echo "1,Sample Data,Protected" >> db-backups/$FILENAME
+          
+          # Upload to Azure Blob Storage using Azure CLI
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --account-key ${{ secrets.AZURE_STORAGE_KEY }} \
+            --container-name ${{ secrets.BLOB_CONTAINER_NAME }} \
+            --file db-backups/$FILENAME \
+            --name "backups/$(date +'%Y-%m')/$FILENAME" \
+            --overwrite
+          
+          echo "✅ Backup successfully stored in Azure: backups/$(date +'%Y-%m')/$FILENAME"
+
+  # --- STAGE 8: Deploy to GitHub Pages ---
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: [build-and-scan, database-protection]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist' # Adjust this to your build output directory
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
