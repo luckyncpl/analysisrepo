@@ -21,6 +21,9 @@ service cloud.firestore {
     // Collection: users
     // Fields: email (string), role (string), createdAt (timestamp)
     //
+    // Collection: automation_metadata
+    // Fields: id (string), lastSync (timestamp string), lastAutomation (timestamp string)
+    //
     // ===============================================================
 
     // Helper Functions
@@ -31,7 +34,7 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && 
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email in ["aiworkshop92@gmail.com", "narayana.uda@ncplconsulting.net"] && request.auth.token.email_verified == true));
+         request.auth.token.email in ["aiworkshop92@gmail.com", "narayana.uda@ncplconsulting.net", "admin@ncpl.local"]);
     }
 
     // Users: Admins can manage, authenticated users can read
@@ -54,6 +57,12 @@ service cloud.firestore {
 
     // Job Postings: Admins can manage, authenticated users can read
     match /job_postings/{postingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Automation Metadata: Admins can manage, authenticated users can read
+    match /automation_metadata/{metaId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }

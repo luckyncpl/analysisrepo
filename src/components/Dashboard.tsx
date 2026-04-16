@@ -3,21 +3,39 @@ import { db } from '../lib/firebase';
 import { collection, query, onSnapshot } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { CheckCircle2, XCircle, Zap, Briefcase, TrendingUp, Filter, RotateCcw } from 'lucide-react';
+import { CheckCircle2, XCircle, Zap, Briefcase, TrendingUp, Filter, RotateCcw, Calendar as CalendarIcon } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Button } from './ui/button';
+import { Button, buttonVariants } from './ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Calendar } from './ui/calendar';
+import { format, isWithinInterval, parseISO, startOfDay, endOfDay, subDays, subMonths, subYears, startOfYear } from 'date-fns';
+import { cn } from '../lib/utils';
+import { Badge } from './ui/badge';
 
 export default function Dashboard() {
   const [postings, setPostings] = useState<any[]>([]);
   const [candidates, setCandidates] = useState<any[]>([]);
   const [masters, setMasters] = useState<any[]>([]);
   
-  const [filters, setFilters] = useState({
-    technology: 'all',
-    teamLead: 'all',
-    rmPerson: 'all',
-    mentoringLead: 'all'
+  // Applied filters (used for stats and charts)
+  const [appliedFilters, setAppliedFilters] = useState({
+    technology: '',
+    teamLead: '',
+    rmPerson: '',
+    mentoringLead: '',
+    dateRange: { from: undefined as Date | undefined, to: undefined as Date | undefined }
   });
+
+  // Draft filters (local UI state before clicking Apply)
+  const [draftFilters, setDraftFilters] = useState({
+    technology: '',
+    teamLead: '',
+    rmPerson: '',
+    mentoringLead: '',
+    dateRange: { from: undefined as Date | undefined, to: undefined as Date | undefined }
+  });
+
+  const [activeQuickFilter, setActiveQuickFilter] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubP = onSnapshot(query(collection(db, 'job_postings')), (snapshot) => {
@@ -35,23 +53,67 @@ export default function Dashboard() {
   const getMasterOptions = (type: string) => 
     masters.filter(m => m.type === type).sort((a, b) => a.name.localeCompare(b.name));
 
+  const applyFilters = () => {
+    setAppliedFilters(draftFilters);
+  };
+
   const resetFilters = () => {
-    setFilters({
-      technology: 'all',
-      teamLead: 'all',
-      rmPerson: 'all',
-      mentoringLead: 'all'
-    });
+    const defaultFilters = {
+      technology: '',
+      teamLead: '',
+      rmPerson: '',
+      mentoringLead: '',
+      dateRange: { from: undefined, to: undefined }
+    };
+    setDraftFilters(defaultFilters);
+    setAppliedFilters(defaultFilters);
+    setActiveQuickFilter(null);
+  };
+
+  const setQuickFilter = (type: string) => {
+    const today = new Date();
+    let from: Date | undefined;
+    let to: Date = today;
+
+    switch (type) {
+      case '30d': from = subDays(today, 30); break;
+      case '90d': from = subDays(today, 90); break;
+      case '120d': from = subDays(today, 120); break;
+      case '6m': from = subMonths(today, 6); break;
+      case '1y': from = subYears(today, 1); break;
+      case 'ytd': from = startOfYear(today); break;
+      default: break;
+    }
+
+    setDraftFilters(prev => ({
+      ...prev,
+      dateRange: { from, to }
+    }));
+    setActiveQuickFilter(type);
   };
 
   const filteredPostings = postings.filter(p => {
     const candidate = candidates.find(c => c.id === p.candidateId);
     if (!candidate) return false;
 
-    if (filters.technology !== 'all' && candidate.technology !== filters.technology) return false;
-    if (filters.teamLead !== 'all' && candidate.teamLead !== filters.teamLead) return false;
-    if (filters.rmPerson !== 'all' && candidate.rmPerson !== filters.rmPerson) return false;
-    if (filters.mentoringLead !== 'all' && candidate.mentoringLead !== filters.mentoringLead) return false;
+    // Filter by Dropdowns
+    if (appliedFilters.technology && candidate.technology !== appliedFilters.technology) return false;
+    if (appliedFilters.teamLead && candidate.teamLead !== appliedFilters.teamLead) return false;
+    if (appliedFilters.rmPerson && candidate.rmPerson !== appliedFilters.rmPerson) return false;
+    if (appliedFilters.mentoringLead && candidate.mentoringLead !== appliedFilters.mentoringLead) return false;
+
+    // Filter by Date Range
+    if (appliedFilters.dateRange.from || appliedFilters.dateRange.to) {
+      const postingDateStr = p.date || (p.createdAt?.toDate ? p.createdAt.toDate().toISOString() : null);
+      if (!postingDateStr) return false;
+
+      const pDate = parseISO(postingDateStr);
+      const start = appliedFilters.dateRange.from ? startOfDay(appliedFilters.dateRange.from).getTime() : 0;
+      const end = appliedFilters.dateRange.to ? endOfDay(appliedFilters.dateRange.to).getTime() : Infinity;
+      const pTime = pDate.getTime();
+
+      if (pTime < start || pTime > end) return false;
+    }
 
     return true;
   });
@@ -98,79 +160,154 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
           <div className="flex items-center justify-between border-b border-slate-50 pb-4">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 bg-indigo-50 rounded-lg">
-                <Filter className="w-4 h-4 text-indigo-600" />
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-indigo-50 rounded-xl">
+                <Filter className="w-5 h-5 text-indigo-600" />
               </div>
               <div>
-                <span className="text-sm font-bold text-slate-800">Analytics Filters</span>
-                <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">Refine your data view</p>
+                <span className="text-base font-bold text-slate-800">Analytics Filters</span>
+                <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">Refine your overview statistics</p>
               </div>
             </div>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={resetFilters} 
-              className="h-8 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 gap-2 rounded-lg transition-all"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span className="text-xs font-bold">Reset Filters</span>
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={resetFilters} 
+                className="h-9 px-4 text-slate-500 hover:text-red-600 hover:bg-red-50 gap-2 rounded-xl transition-all font-bold text-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset
+              </Button>
+              <Button 
+                size="sm" 
+                onClick={applyFilters} 
+                className="h-9 px-6 bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-100 rounded-xl transition-all font-bold text-xs"
+              >
+                Apply Filters
+              </Button>
+            </div>
           </div>
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
             <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider ml-1">Technology</label>
-              <Select value={filters.technology} onValueChange={v => setFilters({...filters, technology: v})}>
-                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/30 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest ml-1">Technology</label>
+              <Select value={draftFilters.technology} onValueChange={v => setDraftFilters({...draftFilters, technology: v === 'all' ? '' : v})}>
+                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
                   <SelectValue placeholder="Select Technology" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  <SelectItem value="all">Select Technology</SelectItem>
+                  <SelectItem value="all" className="text-slate-400 italic">Clear Selection</SelectItem>
                   {getMasterOptions('technology').map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider ml-1">Team Lead</label>
-              <Select value={filters.teamLead} onValueChange={v => setFilters({...filters, teamLead: v})}>
-                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/30 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest ml-1">Team Lead</label>
+              <Select value={draftFilters.teamLead} onValueChange={v => setDraftFilters({...draftFilters, teamLead: v === 'all' ? '' : v})}>
+                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
                   <SelectValue placeholder="Select Team Lead" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  <SelectItem value="all">Select Team Lead</SelectItem>
+                  <SelectItem value="all" className="text-slate-400 italic">Clear Selection</SelectItem>
                   {getMasterOptions('team_lead').map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider ml-1">RM Person</label>
-              <Select value={filters.rmPerson} onValueChange={v => setFilters({...filters, rmPerson: v})}>
-                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/30 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest ml-1">RM Person</label>
+              <Select value={draftFilters.rmPerson} onValueChange={v => setDraftFilters({...draftFilters, rmPerson: v === 'all' ? '' : v})}>
+                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
                   <SelectValue placeholder="Select RM Person" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  <SelectItem value="all">Select RM Person</SelectItem>
+                  <SelectItem value="all" className="text-slate-400 italic">Clear Selection</SelectItem>
                   {getMasterOptions('rm_person').map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider ml-1">Mentoring Lead (ML)</label>
-              <Select value={filters.mentoringLead} onValueChange={v => setFilters({...filters, mentoringLead: v})}>
-                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/30 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
-                  <SelectValue placeholder="Select Mentor" />
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest ml-1">Mentoring Lead</label>
+              <Select value={draftFilters.mentoringLead} onValueChange={v => setDraftFilters({...draftFilters, mentoringLead: v === 'all' ? '' : v})}>
+                <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition-all text-sm font-medium">
+                  <SelectValue placeholder="Select Mentoring Lead" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  <SelectItem value="all">Select Mentor</SelectItem>
+                  <SelectItem value="all" className="text-slate-400 italic">Clear Selection</SelectItem>
                   {getMasterOptions('mentoring_lead').map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest ml-1">Date Range</label>
+              <Popover>
+                <PopoverTrigger
+                    className={cn(
+                      buttonVariants({ variant: "outline" }),
+                      "h-11 w-full justify-start text-left font-medium rounded-xl border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-200 transition-all",
+                      !draftFilters.dateRange.from && "text-slate-500"
+                    )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4 text-slate-400" />
+                  {draftFilters.dateRange?.from ? (
+                    draftFilters.dateRange.to ? (
+                      <>
+                        {format(draftFilters.dateRange.from, "LLL dd, y")} -{" "}
+                        {format(draftFilters.dateRange.to, "LLL dd, y")}
+                      </>
+                    ) : (
+                      format(draftFilters.dateRange.from, "LLL dd, y")
+                    )
+                  ) : (
+                    <span className="text-slate-400">Select Date Range</span>
+                  )}
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 rounded-2xl shadow-xl border-slate-100" align="start">
+                  <div className="p-4 border-b border-slate-50 flex flex-wrap gap-2 bg-slate-50/30">
+                    {[
+                      { label: '30D', value: '30d' },
+                      { label: '90D', value: '90d' },
+                      { label: '120D', value: '120d' },
+                      { label: '6M', value: '6m' },
+                      { label: '1Y', value: '1y' },
+                      { label: 'YTD', value: 'ytd' }
+                    ].map(q => (
+                      <button
+                        key={q.value}
+                        onClick={() => setQuickFilter(q.value)}
+                        className={cn(
+                          "px-3 py-1 text-[10px] font-bold rounded-lg transition-all",
+                          activeQuickFilter === q.value
+                            ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
+                            : "bg-white text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-200"
+                        )}
+                      >
+                        {q.label}
+                      </button>
+                    ))}
+                  </div>
+                  <Calendar
+                    initialFocus
+                    mode="range"
+                    captionLayout="dropdown-buttons"
+                    fromYear={2020}
+                    toYear={new Date().getFullYear()}
+                    defaultMonth={draftFilters.dateRange?.from}
+                    selected={{ from: draftFilters.dateRange.from, to: draftFilters.dateRange.to }}
+                    onSelect={(range: any) => {
+                      setDraftFilters({...draftFilters, dateRange: { from: range?.from, to: range?.to }});
+                      setActiveQuickFilter(null);
+                    }}
+                    numberOfMonths={2}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
         </div>
