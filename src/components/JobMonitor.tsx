@@ -130,7 +130,8 @@ export default function JobMonitor() {
       });
       
       if (!resolveRes.ok) {
-        throw new Error('Failed to resolve URL');
+        const errorData = await resolveRes.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to resolve URL');
       }
 
       const resolveData = await resolveRes.json();

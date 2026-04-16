@@ -46,36 +46,52 @@ async function startServer() {
 
   // API: Resolve TinyURL with Fallback
   app.post("/api/resolve-url", async (req, res) => {
-    const { url } = req.body;
+    let { url } = req.body;
     if (!url) return res.status(400).json({ error: "URL is required" });
+
+    // Normalize URL
+    url = url.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
 
     try {
       // Layer 1: Fast HTTP Resolution
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const response = await fetch(url, { 
         method: 'GET', 
         redirect: 'follow',
+        signal: controller.signal,
         headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
         }
       });
+      
+      clearTimeout(timeoutId);
       
       if (response.ok) {
         return res.json({ finalUrl: response.url, method: 'fast' });
       }
     } catch (error) {
-      console.log("Fast resolution failed, will try browser...");
+      console.log(`Fast resolution failed for ${url}:`, error instanceof Error ? error.message : error);
     }
 
     // Layer 2: Browser Fallback
     let browser;
     try {
-      browser = await chromium.launch();
+      browser = await chromium.launch({
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
       const page = await browser.newPage();
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       const finalUrl = page.url();
       res.json({ finalUrl, method: 'browser' });
     } catch (error) {
-      res.status(500).json({ error: "Failed to resolve URL after all attempts" });
+      console.error(`Browser resolution failed for ${url}:`, error);
+      res.status(500).json({ error: "Could not reach or resolve the job URL. Please check if the link is valid." });
     } finally {
       if (browser) await browser.close();
     }
@@ -83,10 +99,20 @@ async function startServer() {
 
   // API: Scrape Job Description with Stealth and Platform-Specific Logic
   app.post("/api/scrape-job", async (req, res) => {
-    const { url } = req.body;
+    let { url } = req.body;
+    if (!url) return res.status(400).json({ error: "URL is required" });
+
+    // Normalize URL
+    url = url.trim();
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+
     let browser;
     try {
-      browser = await chromium.launch();
+      browser = await chromium.launch({
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
       const page = await browser.newPage();
       
       // Set realistic headers
@@ -94,7 +120,7 @@ async function startServer() {
         'Accept-Language': 'en-US,en;q=0.9',
       });
 
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       
       // Platform-specific JD selectors
       const extraction = await page.evaluate(() => {
