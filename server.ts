@@ -18,29 +18,45 @@ async function startServer() {
 
   // API: Parse Resume File
   app.post("/api/extract-text", upload.single('resume'), async (req, res) => {
+    console.log("Received resume extraction request");
     if (!req.file) {
+      console.error("No file uploaded in request");
       return res.status(400).json({ error: "No file uploaded" });
     }
+
+    console.log(`File received: ${req.file.originalname}, size: ${req.file.size}, mimetype: ${req.file.mimetype}`);
 
     try {
       let text = "";
       if (req.file.mimetype === "application/pdf") {
+        console.log("Extracting text from PDF...");
         const data = await pdf(req.file.buffer);
         text = data.text;
+        console.log(`PDF extraction successful. Length: ${text.length}`);
       } else if (
         req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-        req.file.mimetype === "application/msword"
+        req.file.mimetype === "application/msword" ||
+        req.file.originalname.endsWith('.docx') ||
+        req.file.originalname.endsWith('.doc')
       ) {
+        console.log("Extracting text from DOCX/DOC...");
         const result = await mammoth.extractRawText({ buffer: req.file.buffer });
         text = result.value;
+        console.log(`DOCX extraction successful. Length: ${text.length}`);
       } else {
+        console.error(`Unsupported mimetype: ${req.file.mimetype}`);
         return res.status(400).json({ error: "Unsupported file type. Please upload PDF or DOCX." });
+      }
+
+      if (!text || text.trim().length === 0) {
+        console.warn("Extracted text is empty");
+        return res.status(422).json({ error: "Could not extract any text from the file. The file might be empty or scanned as an image." });
       }
 
       res.json({ text });
     } catch (error) {
-      console.error("Extraction error:", error);
-      res.status(500).json({ error: "Failed to extract text from resume" });
+      console.error("Extraction error details:", error);
+      res.status(500).json({ error: "Failed to extract text from resume. Please try pasting the text manually." });
     }
   });
 

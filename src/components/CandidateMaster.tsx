@@ -58,7 +58,10 @@ export default function CandidateMaster() {
         body: formDataFile,
       });
 
-      if (!response.ok) throw new Error('Failed to extract text');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to extract text');
+      }
       
       const { text } = await response.json();
       const mastersData = {
