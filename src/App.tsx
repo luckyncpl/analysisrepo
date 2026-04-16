@@ -17,8 +17,24 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // Fallback Auth States
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [showFallback, setShowFallback] = useState(false);
 
   useEffect(() => {
+    // Check for local session first
+    const localSession = localStorage.getItem('ncpl_auth_session');
+    if (localSession) {
+      const sessionData = JSON.parse(localSession);
+      setUser(sessionData);
+      setIsAuthorized(true);
+      setLoading(false);
+      return;
+    }
+
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
@@ -43,17 +59,49 @@ export default function App() {
 
   const login = () => {
     const provider = new GoogleAuthProvider();
-    signInWithPopup(auth, provider);
+    signInWithPopup(auth, provider).catch((err) => {
+      console.error("Google Sign-In Error:", err);
+      setAuthError("Google Sign-In failed. Please use the fallback login below.");
+      setShowFallback(true);
+    });
   };
 
-  const logout = () => signOut(auth);
+  const handleFallbackLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+
+    // Default Credentials
+    const DEFAULT_EMAIL = 'admin@ncpl.local';
+    const DEFAULT_PASS = 'Admin@123';
+
+    if (email === DEFAULT_EMAIL && password === DEFAULT_PASS) {
+      const mockUser = {
+        uid: 'local-admin',
+        displayName: 'NCPL Admin',
+        email: DEFAULT_EMAIL,
+        photoURL: 'https://ui-avatars.com/api/?name=NCPL+Admin&background=4f46e5&color=fff'
+      };
+      localStorage.setItem('ncpl_auth_session', JSON.stringify(mockUser));
+      setUser(mockUser);
+      setIsAuthorized(true);
+    } else {
+      setAuthError('Invalid email or password');
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem('ncpl_auth_session');
+    signOut(auth);
+    setUser(null);
+    setIsAuthorized(null);
+  };
 
   if (loading) return <div className="flex items-center justify-center h-screen">Loading...</div>;
 
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-slate-50 p-4">
-        <div className="p-10 bg-white rounded-3xl shadow-2xl text-center max-w-md border border-slate-100">
+        <div className="p-10 bg-white rounded-3xl shadow-2xl text-center max-w-md w-full border border-slate-100">
           <div className="mb-8 flex justify-center">
             <img
               src="https://media.licdn.com/dms/image/v2/D560BAQHb8YGr2pLlkg/company-logo_200_200/company-logo_200_200/0/1718865466422/ncpl_consulting_logo?e=1778112000&v=beta&t=kvyWVN04xTOucmZftxV-kwczAhPSKztgXacrs5hZDbQ"
@@ -62,10 +110,57 @@ export default function App() {
             />
           </div>
           <h1 className="text-3xl font-bold mb-2 text-indigo-900 tracking-tight">RM Job Monitor</h1>
-          <p className="text-slate-500 mb-10 text-sm font-medium">NCPL Consulting Organization Portal</p>
-          <Button onClick={login} className="w-full py-7 text-lg bg-indigo-600 hover:bg-indigo-700 shadow-xl shadow-indigo-100 rounded-2xl transition-all hover:scale-[1.02]">
-            Sign in with Google
-          </Button>
+          <p className="text-slate-500 mb-8 text-sm font-medium">NCPL Consulting Organization Portal</p>
+          
+          <div className="space-y-4">
+            <Button onClick={login} className="w-full py-7 text-lg bg-indigo-600 hover:bg-indigo-700 shadow-xl shadow-indigo-100 rounded-2xl transition-all hover:scale-[1.02]">
+              Sign in with Google
+            </Button>
+
+            <div className="relative my-8">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-slate-200"></span>
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-slate-400 font-bold">Or fallback login</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleFallbackLogin} className="space-y-4 text-left">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Email Address</label>
+                <input 
+                  type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  placeholder="admin@ncpl.local"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500 uppercase ml-1">Password</label>
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+              
+              {authError && (
+                <p className="text-xs font-bold text-red-500 text-center bg-red-50 py-2 rounded-lg border border-red-100">
+                  {authError}
+                </p>
+              )}
+
+              <Button type="submit" variant="secondary" className="w-full h-12 rounded-xl font-bold">
+                Sign In with Credentials
+              </Button>
+            </form>
+          </div>
         </div>
       </div>
     );
