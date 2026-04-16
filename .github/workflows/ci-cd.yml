@@ -17,6 +17,8 @@ jobs:
   build-and-scan:
     name: Build and Analyze
     runs-on: ubuntu-latest
+    outputs:
+      build_dir: ${{ steps.detect_dir.outputs.build_dir }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -48,6 +50,33 @@ jobs:
             echo "No standard stack detected. Running generic build..."
           fi
 
+      - name: Determine Build Directory
+        id: detect_dir
+        run: |
+          if [ -d "dist" ]; then
+            echo "build_dir=dist" >> $GITHUB_OUTPUT
+            echo "Found dist directory"
+          elif [ -d "build" ]; then
+            echo "build_dir=build" >> $GITHUB_OUTPUT
+            echo "Found build directory"
+          elif [ -d "out" ]; then
+            echo "build_dir=out" >> $GITHUB_OUTPUT
+            echo "Found out directory"
+          elif [ -d "public" ]; then
+            echo "build_dir=public" >> $GITHUB_OUTPUT
+            echo "Found public directory"
+          else
+            echo "build_dir=." >> $GITHUB_OUTPUT
+            echo "Using root directory"
+          fi
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: ${{ steps.detect_dir.outputs.build_dir }}
+          retention-days: 1
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
         env:
@@ -75,7 +104,13 @@ jobs:
         run: |
           DB_PATTERNS="migrations/|db/|schema/|sql/|prisma/|alembic/|flyway/"
           # Get the list of changed files between the previous commit and current commit
-          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep -E "$DB_PATTERNS" || true)
+          # Note: On first push, github.event.before might be all zeros
+          BEFORE_SHA=${{ github.event.before }}
+          if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE_SHA=$(git rev-list --max-parents=0 HEAD)
+          fi
+          
+          CHANGED_FILES=$(git diff --name-only $BEFORE_SHA ${{ github.event.after }} | grep -E "$DB_PATTERNS" || true)
           if [ -n "$CHANGED_FILES" ]; then
             echo "db_changed=true" >> $GITHUB_OUTPUT
             echo "Detected changes in: $CHANGED_FILES"
@@ -98,18 +133,6 @@ jobs:
           mkdir -p db-backups
           
           echo "DB changes detected. Initiating safety backup: $FILENAME"
-          
-          # --- PLACEHOLDER: DB EXPORT COMMANDS ---
-          # Replace the following logic with your specific DB engine command:
-          
-          # [MySQL]
-          # mysql -u root -p${{ secrets.DB_PASSWORD }} -e "SELECT * FROM my_table" --batch --silent > db-backups/$FILENAME
-          
-          # [PostgreSQL]
-          # psql -c "COPY my_table TO STDOUT WITH CSV HEADER" > db-backups/$FILENAME
-          
-          # [SQLite]
-          # sqlite3 my_db.sqlite ".headers on" ".mode csv" ".output db-backups/$FILENAME" "SELECT * FROM my_table;"
           
           # Mocking a successful export for YAML validation
           echo "id,data,vibe_check" > db-backups/$FILENAME
@@ -136,13 +159,30 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: ./deployed-site
+
+      - name: Verify Build Output
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing files in ./deployed-site:"
+          ls -R ./deployed-site
+          if [ ! -d "./deployed-site" ] || [ -z "$(ls -A ./deployed-site)" ]; then
+            echo "❌ ERROR: Build output directory './deployed-site' is missing or empty!"
+            exit 1
+          fi
+          echo "✅ Build output verified."
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './dist' # Adjust this to your build output directory
+          path: './deployed-site'
 
       - name: Deploy to GitHub Pages
         id: deployment
